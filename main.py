@@ -1,13 +1,21 @@
 from fastapi import FastAPI, Request
 import logging
-
-from fastapi import FastAPI, Request
-import logging
 from databases import Database
-from sqlalchemy import MetaData, Table, Column, String, DateTime, Numeric
+from sqlalchemy import MetaData, Table, Column, String, DateTime, Numeric, create_engine
 from sqlalchemy.dialects.postgresql import insert
 from datetime import datetime
 import os
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is not set")
+
+# Log DATABASE_URL with masked password for debugging
+masked_url = DATABASE_URL.replace(DATABASE_URL.split('@')[0], '***')
+logging.info(f"Connecting to database: {masked_url}")
+
+database = Database(DATABASE_URL)
+metadata = MetaData()
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
@@ -15,22 +23,8 @@ latest_events = []  # stores webhook events temporarily
 
 
 
-@app.post("/globlinkesimwebhook")
-async def hook(request: Request):
-    payload = await request.json()
-    latest_events.append(payload)
-    logging.info(f"📩 Webhook: {payload}")
-    return {"status": "ok"}
-
-    
-@app.get("/last-events")
-def get_last_events():
-    return {"events": latest_events[-10:]}  # return latest 10
-
 ########################################################
-DATABASE_URL = os.getenv("DATABASE_URL")
-database = Database(DATABASE_URL)
-metadata = MetaData()
+
 
 # 🚀 Define Table
 payment_webhook_states = Table(
@@ -47,6 +41,34 @@ payment_webhook_states = Table(
     Column("updated_at", DateTime),
     Column("user_id", String),
 )
+
+@app.on_event("startup")
+async def startup():
+    try:
+        # Create table if it doesn't exist
+        engine = create_engine(DATABASE_URL)
+        metadata.create_all(engine)
+        
+        # Connect to database
+        await database.connect()
+        logging.info("Successfully connected to database")
+    except Exception as e:
+        logging.error(f"Failed to connect to database: {str(e)}")
+        raise
+
+@app.post("/globlinkesimwebhook")
+async def hook(request: Request):
+    payload = await request.json()
+    latest_events.append(payload)
+    logging.info(f"📩 Webhook: {payload}")
+    return {"status": "ok"}
+
+    
+@app.get("/last-events")
+def get_last_events():
+    return {"events": latest_events[-10:]}  # return latest 10
+
+########################################################
 
 @app.post("/payssiongloblinkesimwebhhok")
 async def hook(request: Request):
@@ -99,3 +121,7 @@ async def get_last_events():
     query = payment_webhook_states.select().order_by(payment_webhook_states.c.created_at.desc()).limit(10)
     events = await database.fetch_all(query)
     return {"events": [dict(event) for event in events]}
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
