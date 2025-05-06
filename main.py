@@ -93,8 +93,8 @@ async def hook(request: Request):
     return {"status": "ok"}
 
 
-# 🚀 Endpoint to view latest events
-@app.get("/last-events")
+# 🚀 Endpoint to view latest payment webhook events
+@app.get("/last-events-payment-webhook")
 async def get_last_events():
     query = payment_webhook_states.select().order_by(payment_webhook_states.c.created_at.desc()).limit(10)
     events = await database.fetch_all(query)
